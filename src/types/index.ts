@@ -41,6 +41,16 @@ export interface Schedule {
   status: 'available' | 'full' | 'cancelled';
   course_name?: string;
   created_at?: string;
+  bookings?: ScheduleBooking[];
+}
+
+export interface ScheduleBooking {
+  booking_id: number;
+  member_id: number;
+  booking_status: 'booked' | 'checked_in';
+  checked_in_at?: string;
+  member_name: string;
+  member_phone?: string;
 }
 
 export interface Booking {
@@ -67,7 +77,7 @@ export interface WaitlistItem {
   member_id: number;
   family_id?: number;
   position: number;
-  status: 'waiting' | 'converted' | 'cancelled' | 'failed';
+  status: 'waiting' | 'converted' | 'cancelled' | 'failed' | 'skipped';
   joined_at?: string;
   notified_at?: string;
   member_name?: string;
@@ -128,6 +138,7 @@ declare global {
 
       bookClass: (data: any) => Promise<any>;
       cancelBooking: (bookingId: number) => Promise<any>;
+      checkInBooking: (bookingId: number) => Promise<any>;
       getBookings: (memberId?: number) => Promise<Booking[]>;
 
       joinWaitlist: (data: any) => Promise<any>;

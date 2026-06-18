@@ -31,6 +31,17 @@ function BookingPage() {
     }
   };
 
+  const handleCheckIn = async (bookingId: number) => {
+    if (!confirm('确定要为该会员签到吗？')) return;
+    const result = await window.electronAPI.checkInBooking(bookingId);
+    if (result.error) {
+      showMessage('error', result.error);
+    } else {
+      loadBookings();
+      showMessage('success', '签到成功');
+    }
+  };
+
   const handleCheckTimeout = async () => {
     const result = await window.electronAPI.checkTimeoutAndRelease();
     showMessage('success', `已释放${result.releasedCount}个超时预约`);
@@ -128,19 +139,36 @@ function BookingPage() {
                     {booking.booked_at?.slice(0, 16).replace('T', ' ')}
                   </td>
                   <td>
-                    <span className={`badge ${getStatusBadge(booking.status)}`}>
-                      {getStatusText(booking.status)}
-                    </span>
+                    <div>
+                      <span className={`badge ${getStatusBadge(booking.status)}`}>
+                        {getStatusText(booking.status)}
+                      </span>
+                      {booking.checked_in_at && (
+                        <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
+                          {booking.checked_in_at.slice(0, 16).replace('T', ' ')}
+                        </div>
+                      )}
+                    </div>
                   </td>
                   <td>
-                    {booking.status === 'booked' && (
-                      <button
-                        className="btn btn-danger btn-sm"
-                        onClick={() => handleCancelBooking(booking.id)}
-                      >
-                        取消预约
-                      </button>
-                    )}
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      {booking.status === 'booked' && (
+                        <>
+                          <button
+                            className="btn btn-success btn-sm"
+                            onClick={() => handleCheckIn(booking.id)}
+                          >
+                            签到
+                          </button>
+                          <button
+                            className="btn btn-danger btn-sm"
+                            onClick={() => handleCancelBooking(booking.id)}
+                          >
+                            取消预约
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}

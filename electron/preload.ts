@@ -28,6 +28,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   bookClass: (data: any) => ipcRenderer.invoke('book-class', data),
   cancelBooking: (bookingId: number) => ipcRenderer.invoke('cancel-booking', bookingId),
+  checkInBooking: (bookingId: number) => ipcRenderer.invoke('check-in-booking', bookingId),
   getBookings: (memberId?: number) => ipcRenderer.invoke('get-bookings', memberId),
 
   joinWaitlist: (data: any) => ipcRenderer.invoke('join-waitlist', data),

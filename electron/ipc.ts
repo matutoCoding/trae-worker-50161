@@ -3,6 +3,7 @@ import { queryAll, queryOne, runSql } from './database';
 import {
   bookClass,
   cancelBooking,
+  checkInBooking,
   joinWaitlist,
   leaveWaitlist,
   checkTimeoutAndRelease,
@@ -48,7 +49,20 @@ export function registerIpcHandlers() {
       params.push(date);
     }
     sql += ' ORDER BY s.course_date, s.start_time';
-    return queryAll(sql, params);
+    const schedules = queryAll(sql, params);
+
+    return schedules.map((s: any) => {
+      const bookings = queryAll(
+        `SELECT b.id as booking_id, b.member_id, b.status as booking_status, b.checked_in_at,
+                m.name as member_name, m.phone as member_phone
+         FROM bookings b
+         JOIN members m ON b.member_id = m.id
+         WHERE b.schedule_id = ? AND b.status IN ('booked', 'checked_in')
+         ORDER BY b.booked_at`,
+        [s.id]
+      );
+      return { ...s, bookings };
+    });
   });
 
   ipcMain.handle('add-schedule', (_event, data) => {
@@ -192,6 +206,14 @@ export function registerIpcHandlers() {
   ipcMain.handle('cancel-booking', (_event, bookingId) => {
     try {
       return cancelBooking(bookingId);
+    } catch (e: any) {
+      return { error: e.message };
+    }
+  });
+
+  ipcMain.handle('check-in-booking', (_event, bookingId) => {
+    try {
+      return checkInBooking(bookingId);
     } catch (e: any) {
       return { error: e.message };
     }

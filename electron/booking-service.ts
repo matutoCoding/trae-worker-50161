@@ -81,6 +81,24 @@ export function bookClass(scheduleId: number, memberId: number) {
   return { bookingId };
 }
 
+export function checkInBooking(bookingId: number) {
+  const booking = queryOne('SELECT * FROM bookings WHERE id = ?', [bookingId]);
+  if (!booking) {
+    throw new Error('预约不存在');
+  }
+
+  if (booking.status !== 'booked') {
+    throw new Error('该预约状态无法签到');
+  }
+
+  runSql(
+    "UPDATE bookings SET status = 'checked_in', checked_in_at = datetime('now') WHERE id = ?",
+    [bookingId]
+  );
+
+  return { success: true };
+}
+
 export function cancelBooking(bookingId: number) {
   const booking = queryOne('SELECT * FROM bookings WHERE id = ?', [bookingId]);
   if (!booking) {
@@ -98,7 +116,7 @@ export function cancelBooking(bookingId: number) {
     );
 
     runSql(
-      "UPDATE schedules SET booked_count = booked_count - 1, status = 'available' WHERE id = ?",
+      "UPDATE schedules SET booked_count = booked_count - 1 WHERE id = ?",
       [booking.schedule_id]
     );
 
@@ -114,6 +132,16 @@ export function cancelBooking(bookingId: number) {
     }
 
     processWaitlist(booking.schedule_id);
+
+    const finalSchedule = queryOne(
+      'SELECT * FROM schedules WHERE id = ?',
+      [booking.schedule_id]
+    );
+    if (finalSchedule && finalSchedule.booked_count < finalSchedule.capacity) {
+      runSql("UPDATE schedules SET status = 'available' WHERE id = ?", [
+        booking.schedule_id,
+      ]);
+    }
   });
 
   return { success: true };
@@ -205,36 +233,88 @@ export function processWaitlist(scheduleId: number) {
   const schedule = queryOne('SELECT * FROM schedules WHERE id = ?', [
     scheduleId,
   ]);
-  if (!schedule) return;
+  if (!schedule) return null;
 
-  if (schedule.booked_count >= schedule.capacity) return;
+  if (schedule.booked_count >= schedule.capacity) return null;
 
-  const nextWaitlist = queryOne(
-    "SELECT * FROM waitlist WHERE schedule_id = ? AND status = 'waiting' ORDER BY position LIMIT 1",
-    [scheduleId]
-  );
+  let result: any = null;
+  let attempts = 0;
+  const maxAttempts = 50;
 
-  if (!nextWaitlist) return;
+  while (!result && attempts < maxAttempts) {
+    attempts++;
 
-  try {
-    const result = bookClass(scheduleId, nextWaitlist.member_id);
-
-    runSql(
-      "UPDATE waitlist SET status = 'converted', notified_at = datetime('now') WHERE id = ?",
-      [nextWaitlist.id]
+    const nextWaitlist = queryOne(
+      "SELECT * FROM waitlist WHERE schedule_id = ? AND status = 'waiting' ORDER BY position LIMIT 1",
+      [scheduleId]
     );
 
-    return {
-      success: true,
-      memberId: nextWaitlist.member_id,
-      bookingId: result.bookingId,
-    };
-  } catch (e) {
-    runSql("UPDATE waitlist SET status = 'failed' WHERE id = ?", [
-      nextWaitlist.id,
+    if (!nextWaitlist) break;
+
+    try {
+      const bookResult = bookClass(scheduleId, nextWaitlist.member_id);
+
+      runSql(
+        "UPDATE waitlist SET status = 'converted', notified_at = datetime('now') WHERE id = ?",
+        [nextWaitlist.id]
+      );
+
+      const remaining = queryAll(
+        "SELECT * FROM waitlist WHERE schedule_id = ? AND status = 'waiting' ORDER BY position",
+        [scheduleId]
+      );
+      remaining.forEach((item: any, index: number) => {
+        runSql('UPDATE waitlist SET position = ? WHERE id = ?', [
+          index + 1,
+          item.id,
+        ]);
+      });
+
+      result = {
+        success: true,
+        memberId: nextWaitlist.member_id,
+        bookingId: bookResult.bookingId,
+      };
+    } catch (e) {
+      runSql(
+        "UPDATE waitlist SET status = 'skipped', notified_at = datetime('now') WHERE id = ?",
+        [nextWaitlist.id]
+      );
+
+      const remaining = queryAll(
+        "SELECT * FROM waitlist WHERE schedule_id = ? AND status = 'waiting' ORDER BY position",
+        [scheduleId]
+      );
+      remaining.forEach((item: any, index: number) => {
+        runSql('UPDATE waitlist SET position = ? WHERE id = ?', [
+          index + 1,
+          item.id,
+        ]);
+      });
+    }
+
+    const currentSchedule = queryOne('SELECT * FROM schedules WHERE id = ?', [
+      scheduleId,
     ]);
-    return processWaitlist(scheduleId);
+    if (currentSchedule && currentSchedule.booked_count >= currentSchedule.capacity) {
+      break;
+    }
   }
+
+  const finalSchedule = queryOne('SELECT * FROM schedules WHERE id = ?', [
+    scheduleId,
+  ]);
+  if (finalSchedule) {
+    if (finalSchedule.booked_count >= finalSchedule.capacity) {
+      runSql("UPDATE schedules SET status = 'full' WHERE id = ?", [scheduleId]);
+    } else {
+      runSql("UPDATE schedules SET status = 'available' WHERE id = ?", [
+        scheduleId,
+      ]);
+    }
+  }
+
+  return result;
 }
 
 export function checkTimeoutAndRelease() {

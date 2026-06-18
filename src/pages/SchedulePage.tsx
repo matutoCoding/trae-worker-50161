@@ -227,8 +227,41 @@ function SchedulePage() {
                     </span>
                     <span style={{ fontSize: 13, color: '#6b7280' }}>
                       {schedule.booked_count}/{schedule.capacity}人
+                      {schedule.bookings && schedule.bookings.filter(b => b.booking_status === 'checked_in').length > 0 && (
+                        <span style={{ marginLeft: 8, color: '#059669' }}>
+                          (已签到: {schedule.bookings.filter(b => b.booking_status === 'checked_in').length})
+                        </span>
+                      )}
                     </span>
                   </div>
+
+                  {schedule.bookings && schedule.bookings.length > 0 && (
+                    <div style={{
+                      marginBottom: 12,
+                      padding: 8,
+                      backgroundColor: '#f9fafb',
+                      borderRadius: 6,
+                    }}>
+                      <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>
+                        预约名单:
+                      </div>
+                      {schedule.bookings.map((b) => (
+                        <div key={b.booking_id} style={{
+                          fontSize: 12,
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          padding: '2px 0',
+                        }}>
+                          <span>{b.member_name}</span>
+                          {b.booking_status === 'checked_in' ? (
+                            <span style={{ color: '#059669', fontWeight: 600 }}>✓ 已签到</span>
+                          ) : (
+                            <span style={{ color: '#6b7280' }}>待签到</span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   <div style={{ display: 'flex', gap: 8 }}>
                     <button
                       className="btn btn-primary btn-sm"
