@@ -1,0 +1,169 @@
+import { useState, useEffect } from 'react';
+import { Booking } from '../types';
+
+function BookingPage() {
+  const [bookings, setBookings] = useState<Booking[]>([]);
+  const [filterStatus, setFilterStatus] = useState('all');
+  const [message, setMessage] = useState({ type: '', text: '' });
+
+  useEffect(() => {
+    loadBookings();
+  }, []);
+
+  const loadBookings = async () => {
+    const data = await window.electronAPI.getBookings();
+    setBookings(data);
+  };
+
+  const showMessage = (type: string, text: string) => {
+    setMessage({ type, text });
+    setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+  };
+
+  const handleCancelBooking = async (bookingId: number) => {
+    if (!confirm('确定要取消这个预约吗？')) return;
+    const result = await window.electronAPI.cancelBooking(bookingId);
+    if (result.error) {
+      showMessage('error', result.error);
+    } else {
+      loadBookings();
+      showMessage('success', '取消成功，课时已退回');
+    }
+  };
+
+  const handleCheckTimeout = async () => {
+    const result = await window.electronAPI.checkTimeoutAndRelease();
+    showMessage('success', `已释放${result.releasedCount}个超时预约`);
+    loadBookings();
+  };
+
+  const filteredBookings = filterStatus === 'all'
+    ? bookings
+    : bookings.filter((b) => b.status === filterStatus);
+
+  const getStatusText = (status: string) => {
+    const map: any = {
+      booked: '已预约',
+      cancelled: '已取消',
+      checked_in: '已签到',
+      completed: '已完成',
+    };
+    return map[status] || status;
+  };
+
+  const getStatusBadge = (status: string) => {
+    const map: any = {
+      booked: 'badge-info',
+      cancelled: 'badge-secondary',
+      checked_in: 'badge-success',
+      completed: 'badge-success',
+    };
+    return map[status] || 'badge-secondary';
+  };
+
+  return (
+    <div>
+      <div className="page-header">
+        <h1 className="page-title">预约管理</h1>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+          <select
+            className="form-select"
+            style={{ width: 140 }}
+            value={filterStatus}
+            onChange={(e) => setFilterStatus(e.target.value)}
+          >
+            <option value="all">全部状态</option>
+            <option value="booked">已预约</option>
+            <option value="cancelled">已取消</option>
+            <option value="checked_in">已签到</option>
+          </select>
+          <button className="btn btn-secondary" onClick={handleCheckTimeout}>
+            检查超时释放
+          </button>
+        </div>
+      </div>
+
+      {message.text && (
+        <div
+          className="card"
+          style={{
+            marginBottom: 16,
+            padding: '12px 16px',
+            backgroundColor:
+              message.type === 'success' ? '#d1fae5' : '#fee2e2',
+            color: message.type === 'success' ? '#059669' : '#dc2626',
+            borderRadius: 8,
+          }}
+        >
+          {message.text}
+        </div>
+      )}
+
+      <div className="card">
+        <div className="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>课程日期</th>
+                <th>时间</th>
+                <th>课程名称</th>
+                <th>教练</th>
+                <th>会员</th>
+                <th>预约时间</th>
+                <th>状态</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredBookings.map((booking) => (
+                <tr key={booking.id}>
+                  <td>{booking.course_date}</td>
+                  <td>
+                    {booking.start_time} - {booking.end_time}
+                  </td>
+                  <td>{booking.course_name}</td>
+                  <td>{booking.coach_name}</td>
+                  <td>{booking.member_name}</td>
+                  <td>
+                    {booking.booked_at?.slice(0, 16).replace('T', ' ')}
+                  </td>
+                  <td>
+                    <span className={`badge ${getStatusBadge(booking.status)}`}>
+                      {getStatusText(booking.status)}
+                    </span>
+                  </td>
+                  <td>
+                    {booking.status === 'booked' && (
+                      <button
+                        className="btn btn-danger btn-sm"
+                        onClick={() => handleCancelBooking(booking.id)}
+                      >
+                        取消预约
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {filteredBookings.length === 0 && (
+                <tr>
+                  <td
+                    colSpan={8}
+                    style={{
+                      textAlign: 'center',
+                      color: '#9ca3af',
+                      padding: 32,
+                    }}
+                  >
+                    暂无预约记录
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default BookingPage;
