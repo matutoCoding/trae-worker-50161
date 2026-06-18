@@ -1,6 +1,6 @@
 import { queryOne, queryAll, runSql, transaction, saveDatabase } from './database';
 
-function _doBookClass(scheduleId: number, memberId: number): number {
+function _doBookClass(scheduleId: number, memberId: number, options?: { fromWaitlist?: boolean }): number {
   const member = queryOne('SELECT * FROM members WHERE id = ?', [memberId]);
   if (!member) {
     throw new Error('会员不存在');
@@ -24,12 +24,14 @@ function _doBookClass(scheduleId: number, memberId: number): number {
     throw new Error(`您${statusText}该课程，不能重复预约`);
   }
 
-  const existingWaitlist = queryOne(
-    "SELECT * FROM waitlist WHERE schedule_id = ? AND member_id = ? AND status = 'waiting'",
-    [scheduleId, memberId]
-  );
-  if (existingWaitlist) {
-    throw new Error('您已在该课程的候补队列中，请先退出候补再预约');
+  if (!options?.fromWaitlist) {
+    const existingWaitlist = queryOne(
+      "SELECT * FROM waitlist WHERE schedule_id = ? AND member_id = ? AND status = 'waiting'",
+      [scheduleId, memberId]
+    );
+    if (existingWaitlist) {
+      throw new Error('您已在该课程的候补队列中，请先退出候补再预约');
+    }
   }
 
   let bookingId = 0;
@@ -80,9 +82,11 @@ function _doBookClass(scheduleId: number, memberId: number): number {
   }
 
   if (member.family_id) {
+    const desc = options?.fromWaitlist ? '候补补位扣费' : '预约课程扣费';
+    const txType = options?.fromWaitlist ? 'waitlist_book' : 'book';
     runSql(
       'INSERT INTO balance_transactions (family_id, amount, type, booking_id, description) VALUES (?, ?, ?, ?, ?)',
-      [member.family_id, -1, 'book', bookingId, '预约课程扣费']
+      [member.family_id, -1, txType, bookingId, desc]
     );
   }
 
@@ -90,7 +94,9 @@ function _doBookClass(scheduleId: number, memberId: number): number {
 }
 
 function _doProcessWaitlist(scheduleId: number): any {
-  let result: any = null;
+  let convertedCount = 0;
+  let skippedCount = 0;
+  const convertedMembers: any[] = [];
   let attempts = 0;
   const maxAttempts = 50;
 
@@ -111,12 +117,20 @@ function _doProcessWaitlist(scheduleId: number): any {
     if (!nextWaitlist) break;
 
     try {
-      const bookingId = _doBookClass(scheduleId, nextWaitlist.member_id);
+      const bookingId = _doBookClass(scheduleId, nextWaitlist.member_id, { fromWaitlist: true });
 
       runSql(
         "UPDATE waitlist SET status = 'converted', notified_at = datetime('now') WHERE id = ?",
         [nextWaitlist.id]
       );
+
+      const member = queryOne('SELECT * FROM members WHERE id = ?', [nextWaitlist.member_id]);
+      convertedMembers.push({
+        memberId: nextWaitlist.member_id,
+        memberName: member?.name,
+        bookingId,
+      });
+      convertedCount++;
 
       const remaining = queryAll(
         "SELECT * FROM waitlist WHERE schedule_id = ? AND status = 'waiting' ORDER BY position",
@@ -128,19 +142,12 @@ function _doProcessWaitlist(scheduleId: number): any {
           item.id,
         ]);
       });
-
-      if (!result) {
-        result = {
-          success: true,
-          memberId: nextWaitlist.member_id,
-          bookingId,
-        };
-      }
     } catch (e) {
       runSql(
         "UPDATE waitlist SET status = 'skipped', notified_at = datetime('now') WHERE id = ?",
         [nextWaitlist.id]
       );
+      skippedCount++;
 
       const remaining = queryAll(
         "SELECT * FROM waitlist WHERE schedule_id = ? AND status = 'waiting' ORDER BY position",
@@ -168,7 +175,12 @@ function _doProcessWaitlist(scheduleId: number): any {
     }
   }
 
-  return result;
+  return {
+    success: convertedCount > 0,
+    convertedCount,
+    skippedCount,
+    convertedMembers,
+  };
 }
 
 export function bookClass(scheduleId: number, memberId: number) {
@@ -251,6 +263,8 @@ export function cancelBooking(bookingId: number) {
     throw new Error('该预约无法取消');
   }
 
+  let waitlistResult: any = null;
+
   transaction(() => {
     runSql(
       "UPDATE bookings SET status = 'cancelled', cancelled_at = datetime('now') WHERE id = ?",
@@ -273,10 +287,10 @@ export function cancelBooking(bookingId: number) {
       );
     }
 
-    _doProcessWaitlist(booking.schedule_id);
+    waitlistResult = _doProcessWaitlist(booking.schedule_id);
   });
 
-  return { success: true };
+  return { success: true, waitlistProcessed: waitlistResult };
 }
 
 export function joinWaitlist(scheduleId: number, memberId: number) {

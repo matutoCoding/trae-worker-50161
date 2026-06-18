@@ -54,7 +54,15 @@ function BookingPage() {
       showMessage('error', result.error);
     } else {
       loadBookings();
-      showMessage('success', '取消成功，课时已退回');
+      let msg = '取消成功，课时已退回';
+      if (result.waitlistProcessed && result.waitlistProcessed.convertedCount > 0) {
+        const names = result.waitlistProcessed.convertedMembers
+          ?.map((m: any) => m.memberName)
+          .filter(Boolean)
+          .join('、');
+        msg += `，候补补位${result.waitlistProcessed.convertedCount}人${names ? '：' + names : ''}`;
+      }
+      showMessage('success', msg);
     }
   };
 

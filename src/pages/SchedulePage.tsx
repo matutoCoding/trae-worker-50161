@@ -149,8 +149,12 @@ function SchedulePage() {
     }
     setShowEditModal(false);
     loadData();
-    if (result.waitlistProcessed && result.waitlistProcessed.success) {
-      showMessage('success', '课程修改成功，候补已自动补位');
+    if (result.waitlistProcessed && result.waitlistProcessed.convertedCount > 0) {
+      const names = result.waitlistProcessed.convertedMembers
+        ?.map((m: any) => m.memberName)
+        .filter(Boolean)
+        .join('、');
+      showMessage('success', `课程修改成功，候补补位${result.waitlistProcessed.convertedCount}人${names ? '：' + names : ''}`);
     } else {
       showMessage('success', '课程修改成功');
     }

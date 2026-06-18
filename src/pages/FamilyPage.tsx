@@ -86,6 +86,7 @@ function FamilyPage() {
     const map: any = {
       recharge: '充值',
       book: '预约扣课',
+      waitlist_book: '候补补位扣课',
       cancel: '取消退款',
     };
     return map[type] || type;
@@ -93,6 +94,7 @@ function FamilyPage() {
 
   const getTxBadgeClass = (type: string) => {
     if (type === 'recharge' || type === 'cancel') return 'badge-success';
+    if (type === 'waitlist_book') return 'badge-info';
     return 'badge-warning';
   };
 

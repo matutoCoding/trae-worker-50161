@@ -76,7 +76,7 @@ export interface BalanceTransaction {
   id: number;
   family_id: number;
   amount: number;
-  type: 'recharge' | 'book' | 'cancel';
+  type: 'recharge' | 'book' | 'waitlist_book' | 'cancel';
   booking_id?: number;
   description?: string;
   created_at?: string;
