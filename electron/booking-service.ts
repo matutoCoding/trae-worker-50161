@@ -1,6 +1,6 @@
 import { queryOne, queryAll, runSql, transaction, saveDatabase } from './database';
 
-export function bookClass(scheduleId: number, memberId: number) {
+function _doBookClass(scheduleId: number, memberId: number): number {
   const member = queryOne('SELECT * FROM members WHERE id = ?', [memberId]);
   if (!member) {
     throw new Error('会员不存在');
@@ -11,73 +11,163 @@ export function bookClass(scheduleId: number, memberId: number) {
     throw new Error('课程不存在');
   }
 
-  if (schedule.status !== 'available') {
-    throw new Error('课程不可预约');
-  }
-
   if (schedule.booked_count >= schedule.capacity) {
     throw new Error('课程已满员，请加入候补队列');
   }
 
   const existingBooking = queryOne(
-    "SELECT * FROM bookings WHERE schedule_id = ? AND member_id = ? AND status = 'booked'",
+    "SELECT * FROM bookings WHERE schedule_id = ? AND member_id = ? AND status IN ('booked', 'checked_in')",
     [scheduleId, memberId]
   );
   if (existingBooking) {
-    throw new Error('您已预约该课程');
+    const statusText = existingBooking.status === 'checked_in' ? '已签到' : '已预约';
+    throw new Error(`您${statusText}该课程，不能重复预约`);
   }
 
   let bookingId = 0;
 
-  transaction(() => {
-    if (member.family_id) {
-      const family = queryOne('SELECT * FROM families WHERE id = ?', [
-        member.family_id,
-      ]);
-      if (!family || family.balance <= 0) {
-        throw new Error('家庭课时余额不足');
-      }
-
-      const updateResult = runSql(
-        'UPDATE families SET balance = balance - 1 WHERE id = ? AND balance > 0',
-        [member.family_id]
-      );
-
-      if (updateResult.changes === 0) {
-        throw new Error('扣款失败，请重试');
-      }
+  if (member.family_id) {
+    const family = queryOne('SELECT * FROM families WHERE id = ?', [
+      member.family_id,
+    ]);
+    if (!family || family.balance <= 0) {
+      throw new Error('家庭课时余额不足');
     }
 
-    const insertResult = runSql(
-      'INSERT INTO bookings (schedule_id, member_id, family_id, status) VALUES (?, ?, ?, ?)',
-      [scheduleId, memberId, member.family_id || null, 'booked']
+    const updateResult = runSql(
+      'UPDATE families SET balance = balance - 1 WHERE id = ? AND balance > 0',
+      [member.family_id]
     );
-    bookingId = insertResult.lastInsertRowid;
 
+    if (updateResult.changes === 0) {
+      throw new Error('扣款失败，请重试');
+    }
+  }
+
+  const insertResult = runSql(
+    'INSERT INTO bookings (schedule_id, member_id, family_id, status) VALUES (?, ?, ?, ?)',
+    [scheduleId, memberId, member.family_id || null, 'booked']
+  );
+  bookingId = insertResult.lastInsertRowid;
+
+  runSql(
+    'UPDATE schedules SET booked_count = booked_count + 1 WHERE id = ?',
+    [scheduleId]
+  );
+
+  const updatedSchedule = queryOne(
+    'SELECT * FROM schedules WHERE id = ?',
+    [scheduleId]
+  );
+  if (updatedSchedule && updatedSchedule.booked_count >= updatedSchedule.capacity) {
+    runSql("UPDATE schedules SET status = ? WHERE id = ?", [
+      'full',
+      scheduleId,
+    ]);
+  } else {
+    runSql("UPDATE schedules SET status = ? WHERE id = ?", [
+      'available',
+      scheduleId,
+    ]);
+  }
+
+  if (member.family_id) {
     runSql(
-      'UPDATE schedules SET booked_count = booked_count + 1 WHERE id = ?',
+      'INSERT INTO balance_transactions (family_id, amount, type, booking_id, description) VALUES (?, ?, ?, ?, ?)',
+      [member.family_id, -1, 'book', bookingId, '预约课程扣费']
+    );
+  }
+
+  return bookingId;
+}
+
+function _doProcessWaitlist(scheduleId: number): any {
+  let result: any = null;
+  let attempts = 0;
+  const maxAttempts = 50;
+
+  while (attempts < maxAttempts) {
+    attempts++;
+
+    const currentSchedule = queryOne('SELECT * FROM schedules WHERE id = ?', [
+      scheduleId,
+    ]);
+    if (!currentSchedule) break;
+    if (currentSchedule.booked_count >= currentSchedule.capacity) break;
+
+    const nextWaitlist = queryOne(
+      "SELECT * FROM waitlist WHERE schedule_id = ? AND status = 'waiting' ORDER BY position LIMIT 1",
       [scheduleId]
     );
 
-    const updatedSchedule = queryOne(
-      'SELECT * FROM schedules WHERE id = ?',
-      [scheduleId]
-    );
-    if (updatedSchedule && updatedSchedule.booked_count >= updatedSchedule.capacity) {
-      runSql("UPDATE schedules SET status = ? WHERE id = ?", [
-        'full',
+    if (!nextWaitlist) break;
+
+    try {
+      const bookingId = _doBookClass(scheduleId, nextWaitlist.member_id);
+
+      runSql(
+        "UPDATE waitlist SET status = 'converted', notified_at = datetime('now') WHERE id = ?",
+        [nextWaitlist.id]
+      );
+
+      const remaining = queryAll(
+        "SELECT * FROM waitlist WHERE schedule_id = ? AND status = 'waiting' ORDER BY position",
+        [scheduleId]
+      );
+      remaining.forEach((item: any, index: number) => {
+        runSql('UPDATE waitlist SET position = ? WHERE id = ?', [
+          index + 1,
+          item.id,
+        ]);
+      });
+
+      if (!result) {
+        result = {
+          success: true,
+          memberId: nextWaitlist.member_id,
+          bookingId,
+        };
+      }
+    } catch (e) {
+      runSql(
+        "UPDATE waitlist SET status = 'skipped', notified_at = datetime('now') WHERE id = ?",
+        [nextWaitlist.id]
+      );
+
+      const remaining = queryAll(
+        "SELECT * FROM waitlist WHERE schedule_id = ? AND status = 'waiting' ORDER BY position",
+        [scheduleId]
+      );
+      remaining.forEach((item: any, index: number) => {
+        runSql('UPDATE waitlist SET position = ? WHERE id = ?', [
+          index + 1,
+          item.id,
+        ]);
+      });
+    }
+  }
+
+  const finalSchedule = queryOne('SELECT * FROM schedules WHERE id = ?', [
+    scheduleId,
+  ]);
+  if (finalSchedule) {
+    if (finalSchedule.booked_count >= finalSchedule.capacity) {
+      runSql("UPDATE schedules SET status = 'full' WHERE id = ?", [scheduleId]);
+    } else {
+      runSql("UPDATE schedules SET status = 'available' WHERE id = ?", [
         scheduleId,
       ]);
     }
+  }
 
-    if (member.family_id) {
-      runSql(
-        'INSERT INTO balance_transactions (family_id, amount, type, booking_id, description) VALUES (?, ?, ?, ?, ?)',
-        [member.family_id, -1, 'book', bookingId, '预约课程扣费']
-      );
-    }
+  return result;
+}
+
+export function bookClass(scheduleId: number, memberId: number) {
+  let bookingId = 0;
+  transaction(() => {
+    bookingId = _doBookClass(scheduleId, memberId);
   });
-
   return { bookingId };
 }
 
@@ -131,17 +221,7 @@ export function cancelBooking(bookingId: number) {
       );
     }
 
-    processWaitlist(booking.schedule_id);
-
-    const finalSchedule = queryOne(
-      'SELECT * FROM schedules WHERE id = ?',
-      [booking.schedule_id]
-    );
-    if (finalSchedule && finalSchedule.booked_count < finalSchedule.capacity) {
-      runSql("UPDATE schedules SET status = 'available' WHERE id = ?", [
-        booking.schedule_id,
-      ]);
-    }
+    _doProcessWaitlist(booking.schedule_id);
   });
 
   return { success: true };
@@ -167,11 +247,12 @@ export function joinWaitlist(scheduleId: number, memberId: number) {
   }
 
   const existingBooking = queryOne(
-    "SELECT * FROM bookings WHERE schedule_id = ? AND member_id = ? AND status = 'booked'",
+    "SELECT * FROM bookings WHERE schedule_id = ? AND member_id = ? AND status IN ('booked', 'checked_in')",
     [scheduleId, memberId]
   );
   if (existingBooking) {
-    throw new Error('您已预约该课程');
+    const statusText = existingBooking.status === 'checked_in' ? '已签到' : '已预约';
+    throw new Error(`您${statusText}该课程，不能加入候补`);
   }
 
   if (member.family_id) {
@@ -230,90 +311,10 @@ export function leaveWaitlist(waitlistId: number) {
 }
 
 export function processWaitlist(scheduleId: number) {
-  const schedule = queryOne('SELECT * FROM schedules WHERE id = ?', [
-    scheduleId,
-  ]);
-  if (!schedule) return null;
-
-  if (schedule.booked_count >= schedule.capacity) return null;
-
   let result: any = null;
-  let attempts = 0;
-  const maxAttempts = 50;
-
-  while (!result && attempts < maxAttempts) {
-    attempts++;
-
-    const nextWaitlist = queryOne(
-      "SELECT * FROM waitlist WHERE schedule_id = ? AND status = 'waiting' ORDER BY position LIMIT 1",
-      [scheduleId]
-    );
-
-    if (!nextWaitlist) break;
-
-    try {
-      const bookResult = bookClass(scheduleId, nextWaitlist.member_id);
-
-      runSql(
-        "UPDATE waitlist SET status = 'converted', notified_at = datetime('now') WHERE id = ?",
-        [nextWaitlist.id]
-      );
-
-      const remaining = queryAll(
-        "SELECT * FROM waitlist WHERE schedule_id = ? AND status = 'waiting' ORDER BY position",
-        [scheduleId]
-      );
-      remaining.forEach((item: any, index: number) => {
-        runSql('UPDATE waitlist SET position = ? WHERE id = ?', [
-          index + 1,
-          item.id,
-        ]);
-      });
-
-      result = {
-        success: true,
-        memberId: nextWaitlist.member_id,
-        bookingId: bookResult.bookingId,
-      };
-    } catch (e) {
-      runSql(
-        "UPDATE waitlist SET status = 'skipped', notified_at = datetime('now') WHERE id = ?",
-        [nextWaitlist.id]
-      );
-
-      const remaining = queryAll(
-        "SELECT * FROM waitlist WHERE schedule_id = ? AND status = 'waiting' ORDER BY position",
-        [scheduleId]
-      );
-      remaining.forEach((item: any, index: number) => {
-        runSql('UPDATE waitlist SET position = ? WHERE id = ?', [
-          index + 1,
-          item.id,
-        ]);
-      });
-    }
-
-    const currentSchedule = queryOne('SELECT * FROM schedules WHERE id = ?', [
-      scheduleId,
-    ]);
-    if (currentSchedule && currentSchedule.booked_count >= currentSchedule.capacity) {
-      break;
-    }
-  }
-
-  const finalSchedule = queryOne('SELECT * FROM schedules WHERE id = ?', [
-    scheduleId,
-  ]);
-  if (finalSchedule) {
-    if (finalSchedule.booked_count >= finalSchedule.capacity) {
-      runSql("UPDATE schedules SET status = 'full' WHERE id = ?", [scheduleId]);
-    } else {
-      runSql("UPDATE schedules SET status = 'available' WHERE id = ?", [
-        scheduleId,
-      ]);
-    }
-  }
-
+  transaction(() => {
+    result = _doProcessWaitlist(scheduleId);
+  });
   return result;
 }
 
