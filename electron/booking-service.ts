@@ -24,6 +24,14 @@ function _doBookClass(scheduleId: number, memberId: number): number {
     throw new Error(`您${statusText}该课程，不能重复预约`);
   }
 
+  const existingWaitlist = queryOne(
+    "SELECT * FROM waitlist WHERE schedule_id = ? AND member_id = ? AND status = 'waiting'",
+    [scheduleId, memberId]
+  );
+  if (existingWaitlist) {
+    throw new Error('您已在该课程的候补队列中，请先退出候补再预约');
+  }
+
   let bookingId = 0;
 
   if (member.family_id) {
@@ -169,6 +177,50 @@ export function bookClass(scheduleId: number, memberId: number) {
     bookingId = _doBookClass(scheduleId, memberId);
   });
   return { bookingId };
+}
+
+export function updateSchedule(scheduleId: number, data: {
+  coach_id: number;
+  course_date: string;
+  start_time: string;
+  end_time: string;
+  capacity: number;
+  course_name?: string;
+}) {
+  const schedule = queryOne('SELECT * FROM schedules WHERE id = ?', [scheduleId]);
+  if (!schedule) {
+    throw new Error('课程不存在');
+  }
+
+  if (data.capacity < schedule.booked_count) {
+    throw new Error(
+      `新容量${data.capacity}不能小于当前已预约人数${schedule.booked_count}`
+    );
+  }
+
+  let result: any = null;
+
+  transaction(() => {
+    runSql(
+      'UPDATE schedules SET coach_id = ?, course_date = ?, start_time = ?, end_time = ?, capacity = ?, course_name = ? WHERE id = ?',
+      [
+        data.coach_id,
+        data.course_date,
+        data.start_time,
+        data.end_time,
+        data.capacity,
+        data.course_name || '私教课',
+        scheduleId,
+      ]
+    );
+
+    if (data.capacity > schedule.capacity) {
+      const processed = _doProcessWaitlist(scheduleId);
+      result = { waitlistProcessed: processed };
+    }
+  });
+
+  return { success: true, ...result };
 }
 
 export function checkInBooking(bookingId: number) {

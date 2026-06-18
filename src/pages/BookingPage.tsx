@@ -1,19 +1,46 @@
 import { useState, useEffect } from 'react';
-import { Booking } from '../types';
+import { Booking, Family, Member } from '../types';
 
 function BookingPage() {
   const [bookings, setBookings] = useState<Booking[]>([]);
+  const [members, setMembers] = useState<Member[]>([]);
+  const [families, setFamilies] = useState<Family[]>([]);
   const [filterStatus, setFilterStatus] = useState('all');
+  const [filterMemberId, setFilterMemberId] = useState<string>('');
+  const [filterFamilyId, setFilterFamilyId] = useState<string>('');
+  const [filterDate, setFilterDate] = useState<string>('');
   const [message, setMessage] = useState({ type: '', text: '' });
 
   useEffect(() => {
-    loadBookings();
+    loadData();
   }, []);
 
+  const loadData = async () => {
+    const [mbs, fams] = await Promise.all([
+      window.electronAPI.getMembers(),
+      window.electronAPI.getFamilies(),
+    ]);
+    setMembers(mbs);
+    setFamilies(fams);
+    loadBookings();
+  };
+
   const loadBookings = async () => {
-    const data = await window.electronAPI.getBookings();
+    const filters: any = {};
+    if (filterMemberId) filters.memberId = parseInt(filterMemberId);
+    if (filterFamilyId) filters.familyId = parseInt(filterFamilyId);
+    if (filterDate) filters.courseDate = filterDate;
+    const data = await window.electronAPI.getBookings(
+      Object.keys(filters).length > 0 ? filters : undefined
+    );
     setBookings(data);
   };
+
+  useEffect(() => {
+    if (members.length > 0) {
+      loadBookings();
+    }
+  }, [filterMemberId, filterFamilyId, filterDate, filterStatus]);
 
   const showMessage = (type: string, text: string) => {
     setMessage({ type, text });
@@ -48,6 +75,13 @@ function BookingPage() {
     loadBookings();
   };
 
+  const handleResetFilters = () => {
+    setFilterMemberId('');
+    setFilterFamilyId('');
+    setFilterDate('');
+    setFilterStatus('all');
+  };
+
   const filteredBookings = filterStatus === 'all'
     ? bookings
     : bookings.filter((b) => b.status === filterStatus);
@@ -76,22 +110,9 @@ function BookingPage() {
     <div>
       <div className="page-header">
         <h1 className="page-title">预约管理</h1>
-        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-          <select
-            className="form-select"
-            style={{ width: 140 }}
-            value={filterStatus}
-            onChange={(e) => setFilterStatus(e.target.value)}
-          >
-            <option value="all">全部状态</option>
-            <option value="booked">已预约</option>
-            <option value="cancelled">已取消</option>
-            <option value="checked_in">已签到</option>
-          </select>
-          <button className="btn btn-secondary" onClick={handleCheckTimeout}>
-            检查超时释放
-          </button>
-        </div>
+        <button className="btn btn-secondary" onClick={handleCheckTimeout}>
+          检查超时释放
+        </button>
       </div>
 
       {message.text && (
@@ -110,6 +131,82 @@ function BookingPage() {
         </div>
       )}
 
+      <div
+        className="card"
+        style={{
+          marginBottom: 16,
+          padding: 16,
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: 12,
+          alignItems: 'center',
+        }}
+      >
+        <div style={{ fontWeight: 500, color: '#374151', marginRight: 8 }}>
+          筛选：
+        </div>
+
+        <select
+          className="form-select"
+          style={{ width: 130 }}
+          value={filterStatus}
+          onChange={(e) => setFilterStatus(e.target.value)}
+        >
+          <option value="all">全部状态</option>
+          <option value="booked">已预约</option>
+          <option value="cancelled">已取消</option>
+          <option value="checked_in">已签到</option>
+        </select>
+
+        <select
+          className="form-select"
+          style={{ width: 150 }}
+          value={filterMemberId}
+          onChange={(e) => setFilterMemberId(e.target.value)}
+        >
+          <option value="">全部会员</option>
+          {members.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.name}
+            </option>
+          ))}
+        </select>
+
+        <select
+          className="form-select"
+          style={{ width: 160 }}
+          value={filterFamilyId}
+          onChange={(e) => setFilterFamilyId(e.target.value)}
+        >
+          <option value="">全部家庭</option>
+          {families.map((f) => (
+            <option key={f.id} value={f.id}>
+              {f.name}
+            </option>
+          ))}
+        </select>
+
+        <input
+          type="date"
+          className="form-input"
+          style={{ width: 160 }}
+          value={filterDate}
+          onChange={(e) => setFilterDate(e.target.value)}
+        />
+
+        <button
+          className="btn btn-sm"
+          style={{ backgroundColor: '#e5e7eb', color: '#374151' }}
+          onClick={handleResetFilters}
+        >
+          重置筛选
+        </button>
+
+        <div style={{ marginLeft: 'auto', color: '#6b7280', fontSize: 13 }}>
+          共 {filteredBookings.length} 条记录
+        </div>
+      </div>
+
       <div className="card">
         <div className="table-container">
           <table>
@@ -120,6 +217,7 @@ function BookingPage() {
                 <th>课程名称</th>
                 <th>教练</th>
                 <th>会员</th>
+                <th>家庭</th>
                 <th>预约时间</th>
                 <th>状态</th>
                 <th>操作</th>
@@ -135,6 +233,7 @@ function BookingPage() {
                   <td>{booking.course_name}</td>
                   <td>{booking.coach_name}</td>
                   <td>{booking.member_name}</td>
+                  <td>{booking.family_name || '-'}</td>
                   <td>
                     {booking.booked_at?.slice(0, 16).replace('T', ' ')}
                   </td>
@@ -175,7 +274,7 @@ function BookingPage() {
               {filteredBookings.length === 0 && (
                 <tr>
                   <td
-                    colSpan={8}
+                    colSpan={9}
                     style={{
                       textAlign: 'center',
                       color: '#9ca3af',

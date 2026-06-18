@@ -9,6 +9,7 @@ function SchedulePage() {
     new Date().toISOString().split('T')[0]
   );
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
   const [showBookingModal, setShowBookingModal] = useState(false);
   const [showWaitlistModal, setShowWaitlistModal] = useState(false);
   const [selectedSchedule, setSelectedSchedule] = useState<Schedule | null>(null);
@@ -20,6 +21,15 @@ function SchedulePage() {
     end_time: '10:00',
     capacity: 1,
     course_name: '私教课',
+  });
+  const [editFormData, setEditFormData] = useState({
+    id: 0,
+    coach_id: '',
+    course_date: '',
+    start_time: '',
+    end_time: '',
+    capacity: 1,
+    course_name: '',
   });
   const [selectedMemberId, setSelectedMemberId] = useState('');
   const [message, setMessage] = useState({ type: '', text: '' });
@@ -107,6 +117,43 @@ function SchedulePage() {
     const data = await window.electronAPI.getWaitlist(schedule.id);
     setWaitlist(data);
     setShowWaitlistModal(true);
+  };
+
+  const openEditModal = (schedule: Schedule) => {
+    setEditFormData({
+      id: schedule.id,
+      coach_id: String(schedule.coach_id),
+      course_date: schedule.course_date,
+      start_time: schedule.start_time,
+      end_time: schedule.end_time,
+      capacity: schedule.capacity,
+      course_name: schedule.course_name || '私教课',
+    });
+    setShowEditModal(true);
+  };
+
+  const handleUpdateSchedule = async () => {
+    if (!editFormData.coach_id) {
+      showMessage('error', '请选择教练');
+      return;
+    }
+    const result = await window.electronAPI.updateSchedule({
+      ...editFormData,
+      id: editFormData.id,
+      coach_id: parseInt(editFormData.coach_id),
+      capacity: parseInt(editFormData.capacity as any),
+    });
+    if (result.error) {
+      showMessage('error', result.error);
+      return;
+    }
+    setShowEditModal(false);
+    loadData();
+    if (result.waitlistProcessed && result.waitlistProcessed.success) {
+      showMessage('success', '课程修改成功，候补已自动补位');
+    } else {
+      showMessage('success', '课程修改成功');
+    }
   };
 
   const groupedByCoach = schedules.reduce((acc: any, schedule) => {
@@ -278,6 +325,13 @@ function SchedulePage() {
                         候补
                       </button>
                     )}
+                    <button
+                      className="btn btn-sm"
+                      style={{ backgroundColor: '#f3f4f6', color: '#374151' }}
+                      onClick={() => openEditModal(schedule)}
+                    >
+                      编辑
+                    </button>
                   </div>
                 </div>
               ))}
@@ -386,6 +440,128 @@ function SchedulePage() {
               </button>
               <button className="btn btn-primary" onClick={handleAddSchedule}>
                 确定
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showEditModal && (
+        <div className="modal-overlay" onClick={() => setShowEditModal(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title">编辑课程</h3>
+              <button
+                className="modal-close"
+                onClick={() => setShowEditModal(false)}
+              >
+                ×
+              </button>
+            </div>
+            <div className="modal-body">
+              <div
+                style={{
+                  padding: 10,
+                  backgroundColor: '#f9fafb',
+                  borderRadius: 6,
+                  marginBottom: 12,
+                  fontSize: 13,
+                  color: '#374151',
+                }}
+              >
+                当前已预约 <strong>{schedules.find(s => s.id === editFormData.id)?.booked_count || 0}</strong> 人，
+                新容量不能小于已预约人数
+              </div>
+              <div className="form-group">
+                <label className="form-label">教练</label>
+                <select
+                  className="form-select"
+                  value={editFormData.coach_id}
+                  onChange={(e) =>
+                    setEditFormData({ ...editFormData, coach_id: e.target.value })
+                  }
+                >
+                  <option value="">请选择教练</option>
+                  {coaches.map((coach) => (
+                    <option key={coach.id} value={coach.id}>
+                      {coach.name} - {coach.specialty}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="form-row">
+                <div className="form-group">
+                  <label className="form-label">日期</label>
+                  <input
+                    type="date"
+                    className="form-input"
+                    value={editFormData.course_date}
+                    onChange={(e) =>
+                      setEditFormData({ ...editFormData, course_date: e.target.value })
+                    }
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">容量</label>
+                  <input
+                    type="number"
+                    className="form-input"
+                    min="1"
+                    value={editFormData.capacity}
+                    onChange={(e) =>
+                      setEditFormData({
+                        ...editFormData,
+                        capacity: parseInt(e.target.value) || 1,
+                      })
+                    }
+                  />
+                </div>
+              </div>
+              <div className="form-row">
+                <div className="form-group">
+                  <label className="form-label">开始时间</label>
+                  <input
+                    type="time"
+                    className="form-input"
+                    value={editFormData.start_time}
+                    onChange={(e) =>
+                      setEditFormData({ ...editFormData, start_time: e.target.value })
+                    }
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">结束时间</label>
+                  <input
+                    type="time"
+                    className="form-input"
+                    value={editFormData.end_time}
+                    onChange={(e) =>
+                      setEditFormData({ ...editFormData, end_time: e.target.value })
+                    }
+                  />
+                </div>
+              </div>
+              <div className="form-group">
+                <label className="form-label">课程名称</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  value={editFormData.course_name}
+                  onChange={(e) =>
+                    setEditFormData({ ...editFormData, course_name: e.target.value })
+                  }
+                />
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button
+                className="btn btn-secondary"
+                onClick={() => setShowEditModal(false)}
+              >
+                取消
+              </button>
+              <button className="btn btn-primary" onClick={handleUpdateSchedule}>
+                保存修改
               </button>
             </div>
           </div>

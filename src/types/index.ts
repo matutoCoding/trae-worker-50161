@@ -69,6 +69,22 @@ export interface Booking {
   course_name?: string;
   coach_name?: string;
   member_name?: string;
+  family_name?: string;
+}
+
+export interface BalanceTransaction {
+  id: number;
+  family_id: number;
+  amount: number;
+  type: 'recharge' | 'book' | 'cancel';
+  booking_id?: number;
+  description?: string;
+  created_at?: string;
+  member_name?: string;
+  course_date?: string;
+  course_name?: string;
+  start_time?: string;
+  coach_name?: string;
 }
 
 export interface WaitlistItem {
@@ -118,7 +134,7 @@ declare global {
 
       getSchedules: (date?: string) => Promise<Schedule[]>;
       addSchedule: (data: any) => Promise<{ id: number }>;
-      updateSchedule: (data: any) => Promise<{ success: boolean }>;
+      updateSchedule: (data: any) => Promise<any>;
       deleteSchedule: (id: number) => Promise<{ success: boolean }>;
 
       getMembers: () => Promise<Member[]>;
@@ -135,11 +151,12 @@ declare global {
 
       getFamilyBalance: (familyId: number) => Promise<{ balance: number; totalPurchased: number }>;
       rechargeFamily: (data: any) => Promise<{ balance: number }>;
+      getBalanceTransactions: (familyId: number) => Promise<BalanceTransaction[]>;
 
       bookClass: (data: any) => Promise<any>;
       cancelBooking: (bookingId: number) => Promise<any>;
       checkInBooking: (bookingId: number) => Promise<any>;
-      getBookings: (memberId?: number) => Promise<Booking[]>;
+      getBookings: (filters?: { memberId?: number; familyId?: number; courseDate?: string }) => Promise<Booking[]>;
 
       joinWaitlist: (data: any) => Promise<any>;
       getWaitlist: (scheduleId: number) => Promise<WaitlistItem[]>;

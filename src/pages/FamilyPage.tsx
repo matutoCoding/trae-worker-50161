@@ -1,12 +1,14 @@
 import { useState, useEffect } from 'react';
-import { Family, Member } from '../types';
+import { BalanceTransaction, Family, Member } from '../types';
 
 function FamilyPage() {
   const [families, setFamilies] = useState<Family[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showRechargeModal, setShowRechargeModal] = useState(false);
+  const [showTxModal, setShowTxModal] = useState(false);
   const [selectedFamily, setSelectedFamily] = useState<Family | null>(null);
+  const [transactions, setTransactions] = useState<BalanceTransaction[]>([]);
   const [formData, setFormData] = useState({
     name: '',
     initial_balance: 0,
@@ -71,6 +73,27 @@ function FamilyPage() {
   const openRechargeModal = (family: Family) => {
     setSelectedFamily(family);
     setShowRechargeModal(true);
+  };
+
+  const openTxModal = async (family: Family) => {
+    setSelectedFamily(family);
+    const txs = await window.electronAPI.getBalanceTransactions(family.id);
+    setTransactions(txs);
+    setShowTxModal(true);
+  };
+
+  const getTxTypeText = (type: string) => {
+    const map: any = {
+      recharge: '充值',
+      book: '预约扣课',
+      cancel: '取消退款',
+    };
+    return map[type] || type;
+  };
+
+  const getTxBadgeClass = (type: string) => {
+    if (type === 'recharge' || type === 'cancel') return 'badge-success';
+    return 'badge-warning';
   };
 
   const availableMembers = members.filter((m) => !m.family_id);
@@ -188,6 +211,12 @@ function FamilyPage() {
                   onClick={() => openRechargeModal(family)}
                 >
                   充值
+                </button>
+                <button
+                  className="btn btn-info btn-sm"
+                  onClick={() => openTxModal(family)}
+                >
+                  流水
                 </button>
                 <button
                   className="btn btn-secondary btn-sm"
@@ -377,6 +406,99 @@ function FamilyPage() {
               </button>
               <button className="btn btn-primary" onClick={handleRecharge}>
                 确认充值
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showTxModal && selectedFamily && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowTxModal(false)}
+        >
+          <div
+            className="modal"
+            onClick={(e) => e.stopPropagation()}
+            style={{ maxWidth: 800, minWidth: 640 }}
+          >
+            <div className="modal-header">
+              <h3 className="modal-title">
+                {selectedFamily.name} - 课时流水
+              </h3>
+              <button
+                className="modal-close"
+                onClick={() => setShowTxModal(false)}
+              >
+                ×
+              </button>
+            </div>
+            <div className="modal-body" style={{ maxHeight: 480, overflowY: 'auto' }}>
+              <div style={{ marginBottom: 12, fontSize: 13, color: '#6b7280' }}>
+                当前余额: <strong style={{ color: '#4f46e5' }}>{selectedFamily.balance}</strong> 课时
+                　|　累计购买: <strong>{selectedFamily.total_purchased}</strong> 课时
+              </div>
+              {transactions.length > 0 ? (
+                <table style={{ width: '100%', fontSize: 13 }}>
+                  <thead>
+                    <tr style={{ borderBottom: '2px solid #e5e7eb' }}>
+                      <th style={{ textAlign: 'left', padding: '8px 4px' }}>时间</th>
+                      <th style={{ textAlign: 'left', padding: '8px 4px' }}>类型</th>
+                      <th style={{ textAlign: 'right', padding: '8px 4px' }}>课时</th>
+                      <th style={{ textAlign: 'left', padding: '8px 4px' }}>会员</th>
+                      <th style={{ textAlign: 'left', padding: '8px 4px' }}>课程/备注</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {transactions.map((tx) => (
+                      <tr key={tx.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                        <td style={{ padding: '8px 4px', color: '#6b7280' }}>
+                          {tx.created_at?.slice(0, 16).replace('T', ' ')}
+                        </td>
+                        <td style={{ padding: '8px 4px' }}>
+                          <span className={`badge ${getTxBadgeClass(tx.type)}`}>
+                            {getTxTypeText(tx.type)}
+                          </span>
+                        </td>
+                        <td style={{
+                          padding: '8px 4px',
+                          textAlign: 'right',
+                          fontWeight: 600,
+                          color: tx.amount > 0 ? '#059669' : '#dc2626',
+                        }}>
+                          {tx.amount > 0 ? '+' : ''}{tx.amount}
+                        </td>
+                        <td style={{ padding: '8px 4px' }}>
+                          {tx.member_name || '-'}
+                        </td>
+                        <td style={{ padding: '8px 4px', color: '#374151' }}>
+                          {tx.course_name ? (
+                            <>
+                              <div>{tx.course_name}</div>
+                              <div style={{ fontSize: 12, color: '#9ca3af' }}>
+                                {tx.course_date} {tx.start_time} · {tx.coach_name}
+                              </div>
+                            </>
+                          ) : (
+                            tx.description || '-'
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <div style={{ textAlign: 'center', padding: 32, color: '#9ca3af' }}>
+                  暂无流水记录
+                </div>
+              )}
+            </div>
+            <div className="modal-footer">
+              <button
+                className="btn btn-secondary"
+                onClick={() => setShowTxModal(false)}
+              >
+                关闭
               </button>
             </div>
           </div>

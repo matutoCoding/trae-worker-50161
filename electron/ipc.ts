@@ -9,6 +9,7 @@ import {
   checkTimeoutAndRelease,
   rechargeFamily,
   getFamilyBalance,
+  updateSchedule,
 } from './booking-service';
 
 export function registerIpcHandlers() {
@@ -81,24 +82,32 @@ export function registerIpcHandlers() {
   });
 
   ipcMain.handle('update-schedule', (_event, data) => {
-    runSql(
-      'UPDATE schedules SET coach_id = ?, course_date = ?, start_time = ?, end_time = ?, capacity = ?, course_name = ? WHERE id = ?',
-      [
-        data.coach_id,
-        data.course_date,
-        data.start_time,
-        data.end_time,
-        data.capacity,
-        data.course_name,
-        data.id,
-      ]
-    );
-    return { success: true };
+    try {
+      return updateSchedule(data.id, data);
+    } catch (e: any) {
+      return { error: e.message };
+    }
   });
 
   ipcMain.handle('delete-schedule', (_event, id) => {
     runSql('DELETE FROM schedules WHERE id = ?', [id]);
     return { success: true };
+  });
+
+  ipcMain.handle('get-balance-transactions', (_event, familyId) => {
+    const rows = queryAll(
+      `SELECT bt.*, m.name as member_name, s.course_date, s.course_name, s.start_time,
+              c.name as coach_name
+       FROM balance_transactions bt
+       LEFT JOIN bookings b ON bt.booking_id = b.id
+       LEFT JOIN members m ON b.member_id = m.id
+       LEFT JOIN schedules s ON b.schedule_id = s.id
+       LEFT JOIN coaches c ON s.coach_id = c.id
+       WHERE bt.family_id = ?
+       ORDER BY bt.created_at DESC`,
+      [familyId]
+    );
+    return rows;
   });
 
   ipcMain.handle('get-members', () => {
@@ -219,19 +228,36 @@ export function registerIpcHandlers() {
     }
   });
 
-  ipcMain.handle('get-bookings', (_event, memberId?) => {
+  ipcMain.handle('get-bookings', (_event, filters?) => {
     let sql = `
       SELECT b.*, s.course_date, s.start_time, s.end_time, s.course_name,
-             c.name as coach_name, m.name as member_name
+             c.name as coach_name, m.name as member_name, f.name as family_name
       FROM bookings b
       JOIN schedules s ON b.schedule_id = s.id
       JOIN coaches c ON s.coach_id = c.id
       JOIN members m ON b.member_id = m.id
+      LEFT JOIN families f ON b.family_id = f.id
     `;
     const params: any[] = [];
-    if (memberId) {
-      sql += ' WHERE b.member_id = ?';
-      params.push(memberId);
+    const whereClauses: string[] = [];
+
+    if (filters) {
+      if (filters.memberId) {
+        whereClauses.push('b.member_id = ?');
+        params.push(filters.memberId);
+      }
+      if (filters.familyId) {
+        whereClauses.push('b.family_id = ?');
+        params.push(filters.familyId);
+      }
+      if (filters.courseDate) {
+        whereClauses.push('s.course_date = ?');
+        params.push(filters.courseDate);
+      }
+    }
+
+    if (whereClauses.length > 0) {
+      sql += ' WHERE ' + whereClauses.join(' AND ');
     }
     sql += ' ORDER BY s.course_date DESC, s.start_time DESC';
     return queryAll(sql, params);

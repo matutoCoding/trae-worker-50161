@@ -25,11 +25,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   getFamilyBalance: (familyId: number) => ipcRenderer.invoke('get-family-balance', familyId),
   rechargeFamily: (data: any) => ipcRenderer.invoke('recharge-family', data),
+  getBalanceTransactions: (familyId: number) => ipcRenderer.invoke('get-balance-transactions', familyId),
 
   bookClass: (data: any) => ipcRenderer.invoke('book-class', data),
   cancelBooking: (bookingId: number) => ipcRenderer.invoke('cancel-booking', bookingId),
   checkInBooking: (bookingId: number) => ipcRenderer.invoke('check-in-booking', bookingId),
-  getBookings: (memberId?: number) => ipcRenderer.invoke('get-bookings', memberId),
+  getBookings: (filters?: any) => ipcRenderer.invoke('get-bookings', filters),
 
   joinWaitlist: (data: any) => ipcRenderer.invoke('join-waitlist', data),
   getWaitlist: (scheduleId: number) => ipcRenderer.invoke('get-waitlist', scheduleId),
